@@ -38,6 +38,17 @@ async function writeMDFile(notionObj: any, index: number, total: number): Promis
   const unit = properties.Unit?.select.name || 'No unit';
   const name = properties.Name?.title[0]?.plain_text || 'No name';
 
+  const instructorNotes =
+    properties['Instructor notes']?.rich_text.length > 0
+      ? properties['Instructor notes']?.rich_text.map((t) => t.plain_text)
+      : null;
+
+  const linksArr =
+    properties['Instructor notes']?.rich_text.length > 0
+      ? properties['Instructor notes']?.rich_text.map((t) => t.href).filter(Boolean)
+      : null;
+  const instructorNotesLinks = linksArr?.length ? linksArr : null;
+
   const frontMatter = `---
 icon:
   type: ${icon.type}
@@ -53,6 +64,9 @@ properties:
   slides: ${properties.Slides?.rich_text[0]?.plain_text || null}
   unit: ${unit.replaceAll(':', '—')}
   unitColor: ${properties.Unit?.select.color || 'neutral'}
+  instructorNotes:
+    plainText: ${instructorNotes}
+    links: ${instructorNotesLinks}
 ---
 `;
 
@@ -64,16 +78,16 @@ properties:
     '..',
     '..',
     'curriculum',
-    track.replaceAll('/', '-').replaceAll(':', '—'),
-    unit.replaceAll('/', '-').replaceAll(':', '—'),
-    chapter.replaceAll('/', '-').replaceAll(':', '—')
+    track.replaceAll('/', '-').replaceAll(':', ' —'),
+    unit.replaceAll('/', '-').replaceAll(':', ' —'),
+    chapter.replaceAll('/', '-').replaceAll(':', ' —')
   );
   try {
     await access(dirpath);
   } catch {
     await mkdir(dirpath, { recursive: true });
   }
-  const filepath = path.join(dirpath, name.replaceAll('/', '-').replaceAll(':', '—') + '.md');
+  const filepath = path.join(dirpath, name.replaceAll('/', '-').replaceAll(':', ' —') + '.md');
   const data = new Uint8Array(Buffer.from(frontMatter.concat(parent)));
   await writeFile(filepath, data);
 
@@ -114,6 +128,7 @@ async function processWithConcurrencyLimit(
 }
 
 async function egressNotion(database_id: string, start = 1, end?: number, maxConcurrent = 8) {
+  const startTime = Date.now();
   console.log(`Starting egress with max concurrent operations: ${maxConcurrent}`);
 
   const db = await getCurriculumContent(database_id);
@@ -123,8 +138,6 @@ async function egressNotion(database_id: string, start = 1, end?: number, maxCon
   const itemsToProcess = db.slice(loopStart, loopEnd);
 
   console.log(`Processing ${itemsToProcess.length} items...`);
-
-  const startTime = Date.now();
 
   await processWithConcurrencyLimit(
     itemsToProcess,
@@ -141,3 +154,4 @@ async function egressNotion(database_id: string, start = 1, end?: number, maxCon
 }
 
 egressNotion(database_id);
+// console.log(import.meta);
