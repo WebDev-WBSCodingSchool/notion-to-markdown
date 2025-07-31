@@ -1,0 +1,21 @@
+{
+  "name": "notion-egress",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node --env-file=.env src/index.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@notionhq/client": "^4.0.1",
+    "notion-to-md": "^3.1.9",
+    "typescript": "^5.8.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0"
+  }
+}
