@@ -6,13 +6,18 @@ import { NotionToMarkdown } from 'notion-to-md';
 import { getCurriculumContent } from './utils/notionDatabase.js';
 
 const notionSecret = process.env.NOTION_SECRET;
-const database_id = process.env.DATABASE_ID;
+const database_wd = process.env.DATABASE_WD;
+const database_se = process.env.DATABASE_SE;
 if (!notionSecret) {
   console.log('NOTION_SECRET missing in environment');
   process.exit(1);
 }
-if (!database_id) {
-  console.log('DATABASE_ID missing in environment');
+if (!database_wd) {
+  console.log('DATABASE_WD missing in environment');
+  process.exit(1);
+}
+if (!database_se) {
+  console.log('DATABASE_SE missing in environment');
   process.exit(1);
 }
 
@@ -78,8 +83,8 @@ properties:
     '..',
     '..',
     'curriculum',
-    track.replaceAll('/', '-').replaceAll(':', ' —'),
-    unit.replaceAll('/', '-').replaceAll(':', ' —'),
+    // track.replaceAll('/', '-').replaceAll(':', ' —'),
+    // unit.replaceAll('/', '-').replaceAll(':', ' —'),
     chapter.replaceAll('/', '-').replaceAll(':', ' —')
   );
   try {
@@ -127,22 +132,23 @@ async function processWithConcurrencyLimit(
   await Promise.all(activePromises);
 }
 
-async function egressNotion(database_id: string, start = 1, end?: number, maxConcurrent = 8) {
+async function egressNotion(databases: string[], maxConcurrent = 8) {
   const startTime = Date.now();
   console.log(`Starting egress with max concurrent operations: ${maxConcurrent}`);
+  let itemsToProcess: any[] = [];
 
-  const db = await getCurriculumContent(database_id);
-  const loopStart = start - 1;
-  const loopEnd = end ?? db.length;
-
-  const itemsToProcess = db.slice(loopStart, loopEnd);
+  // const db = await getCurriculumContent(database_id);
+  for (const dbId of databases) {
+    const db = await getCurriculumContent(dbId);
+    itemsToProcess = itemsToProcess.concat(db);
+  }
 
   console.log(`Processing ${itemsToProcess.length} items...`);
 
   await processWithConcurrencyLimit(
     itemsToProcess,
     async (notionObj, index, total) => {
-      await writeMDFile(notionObj, loopStart + index, db.length);
+      await writeMDFile(notionObj, index, itemsToProcess.length);
     },
     maxConcurrent
   );
@@ -153,5 +159,4 @@ async function egressNotion(database_id: string, start = 1, end?: number, maxCon
   console.log(`DONE! Processed ${itemsToProcess.length} items in ${duration.toFixed(2)} seconds`);
 }
 
-egressNotion(database_id);
-// console.log(import.meta);
+egressNotion([database_wd, database_se]);
