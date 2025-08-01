@@ -1,9 +1,12 @@
 import { Buffer } from 'node:buffer';
-import { writeFile, access, mkdir } from 'node:fs/promises';
+import { writeFile, access, mkdir, appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Client } from '@notionhq/client';
 import { NotionToMarkdown } from 'notion-to-md';
 import { getCurriculumContent } from './utils/notionDatabase.js';
+
+// import wdCurr from '../db.json';
+// import seCurr from '../se.json';
 
 const notionSecret = process.env.NOTION_SECRET;
 const database_wd = process.env.DATABASE_WD;
@@ -21,6 +24,11 @@ if (!database_se) {
   process.exit(1);
 }
 
+const repoPath = path.join(import.meta.dirname, '..', '..', 'curriculum');
+const seCSV = path.join(repoPath, 'se.csv');
+const wdCSV = path.join(repoPath, 'wd.csv');
+const csvHeader = 'unit,chapter,name,repo_path';
+
 const notion = new Client({
   auth: notionSecret,
 });
@@ -30,7 +38,9 @@ n2m.setCustomTransformer('embed', async (block) => {
   const { embed } = block as any;
   if (!embed?.url) return '';
   return `<figure>
-  <iframe src="${embed?.url}"></iframe>
+  <iframe title="WBS Coding Playground" width="100%" height="600" scrolling="no" allowfullscreen src="${
+    embed?.url
+  }"></iframe>
   <figcaption>${await n2m.blockToMarkdown(embed?.caption)}</figcaption>
 </figure>`;
 });
@@ -79,10 +89,7 @@ properties:
   const { parent } = n2m.toMarkdownString(mdBlocks);
 
   const dirpath = path.join(
-    import.meta.dirname,
-    '..',
-    '..',
-    'curriculum',
+    repoPath,
     // track.replaceAll('/', '-').replaceAll(':', ' —'),
     // unit.replaceAll('/', '-').replaceAll(':', ' —'),
     chapter.replaceAll('/', '-').replaceAll(':', ' —')
@@ -95,7 +102,12 @@ properties:
   const filepath = path.join(dirpath, name.replaceAll('/', '-').replaceAll(':', ' —') + '.md');
   const data = new Uint8Array(Buffer.from(frontMatter.concat(parent)));
   await writeFile(filepath, data);
-
+  const pathInRepo = path.join(
+    chapter.replaceAll('/', '-').replaceAll(':', ' —'),
+    name.replaceAll('/', '-').replaceAll(':', ' —') + '.md'
+  );
+  const csvPath = notionObj.parent.database_id === database_se ? seCSV : wdCSV;
+  await appendFile(csvPath, `\n"${unit}","${chapter}","${name}", "${pathInRepo}"`);
   console.log(`${index + 1}/${total}: ${name} ✓`);
 }
 
@@ -132,18 +144,31 @@ async function processWithConcurrencyLimit(
   await Promise.all(activePromises);
 }
 
-async function egressNotion(databases: string[], maxConcurrent = 8) {
+async function egressNotion(databases: string[], maxConcurrent = 5) {
   const startTime = Date.now();
   console.log(`Starting egress with max concurrent operations: ${maxConcurrent}`);
+  // const db = await getCurriculumContent(database_id);
   let itemsToProcess: any[] = [];
 
-  // const db = await getCurriculumContent(database_id);
   for (const dbId of databases) {
-    const db = await getCurriculumContent(dbId);
+    // const db =`${dbId}.json`;
+    let db: any;
+    try {
+      db = JSON.parse(await readFile(`${dbId}.json`, 'utf-8'));
+      console.log('Reading local file');
+    } catch {
+      console.log('Fetching from Notion...');
+      db = await getCurriculumContent(dbId);
+      const data = new Uint8Array(Buffer.from(JSON.stringify(db)));
+      await writeFile(dbId + '.json', data);
+    }
     itemsToProcess = itemsToProcess.concat(db);
+    // console.dir(itemsToProcess, { depth: 0 });
   }
-
+  // const itemsToProcess = wdCurr.concat(seCurr);
   console.log(`Processing ${itemsToProcess.length} items...`);
+  await writeFile(seCSV, csvHeader);
+  await writeFile(wdCSV, csvHeader);
 
   await processWithConcurrencyLimit(
     itemsToProcess,
@@ -159,4 +184,5 @@ async function egressNotion(databases: string[], maxConcurrent = 8) {
   console.log(`DONE! Processed ${itemsToProcess.length} items in ${duration.toFixed(2)} seconds`);
 }
 
-egressNotion([database_wd, database_se]);
+// egressNotion([database_wd, database_se]);
+egressNotion([database_se]);

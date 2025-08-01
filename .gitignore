@@ -1,5 +1,5 @@
 node_modules
 .env
-db.json
-db*.json
-se.json
+*.json
+!package.json
+!package-lock.json
