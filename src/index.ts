@@ -147,11 +147,9 @@ async function processWithConcurrencyLimit(
 async function egressNotion(databases: string[], maxConcurrent = 5) {
   const startTime = Date.now();
   console.log(`Starting egress with max concurrent operations: ${maxConcurrent}`);
-  // const db = await getCurriculumContent(database_id);
   let itemsToProcess: any[] = [];
 
   for (const dbId of databases) {
-    // const db =`${dbId}.json`;
     let db: any;
     try {
       db = JSON.parse(await readFile(`${dbId}.json`, 'utf-8'));
@@ -163,9 +161,7 @@ async function egressNotion(databases: string[], maxConcurrent = 5) {
       await writeFile(dbId + '.json', data);
     }
     itemsToProcess = itemsToProcess.concat(db);
-    // console.dir(itemsToProcess, { depth: 0 });
   }
-  // const itemsToProcess = wdCurr.concat(seCurr);
   console.log(`Processing ${itemsToProcess.length} items...`);
   await writeFile(seCSV, csvHeader);
   await writeFile(wdCSV, csvHeader);
@@ -184,5 +180,5 @@ async function egressNotion(databases: string[], maxConcurrent = 5) {
   console.log(`DONE! Processed ${itemsToProcess.length} items in ${duration.toFixed(2)} seconds`);
 }
 
-// egressNotion([database_wd, database_se]);
-egressNotion([database_se]);
+egressNotion([database_wd, database_se]);
+// egressNotion([database_se]);
