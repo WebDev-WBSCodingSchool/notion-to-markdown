@@ -161,7 +161,7 @@ const downloadCurriculum = async (database: string, maxConcurrent = 5) => {
   console.log(`Processing ${itemsToProcess.length} items...`);
   await writeFile(CSV, csvHeader);
 
-  await processWithConcurrencyLimit(itemsToProcess.slice(0, 1), writeMDFile, maxConcurrent);
+  await processWithConcurrencyLimit(itemsToProcess, writeMDFile, maxConcurrent);
 
   const endTime = Date.now();
   const duration = (endTime - startTime) / 1000;
