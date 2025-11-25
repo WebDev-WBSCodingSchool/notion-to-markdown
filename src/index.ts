@@ -1,40 +1,41 @@
 import { Buffer } from 'node:buffer';
-import { writeFile, access, mkdir, appendFile, readFile } from 'node:fs/promises';
+import { writeFile, mkdir, appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Client } from '@notionhq/client';
 import { NotionToMarkdown } from 'notion-to-md';
+import slugify from 'slugify';
 import { getCurriculumContent } from './utils/notionDatabase.js';
 
-// import wdCurr from '../db.json';
-// import seCurr from '../se.json';
-
 const notionSecret = process.env.NOTION_SECRET;
-const database_wd = process.env.DATABASE_WD;
-const database_se = process.env.DATABASE_SE;
+const database = process.argv[2];
+const targetDir = process.argv[3];
+
 if (!notionSecret) {
-  console.log('NOTION_SECRET missing in environment');
-  process.exit(1);
-}
-if (!database_wd) {
-  console.log('DATABASE_WD missing in environment');
-  process.exit(1);
-}
-if (!database_se) {
-  console.log('DATABASE_SE missing in environment');
+  console.error('NOTION_SECRET missing in environment');
   process.exit(1);
 }
 
-const repoPath = path.join(import.meta.dirname, '..', '..', 'curriculum');
-const seCSV = path.join(repoPath, 'se.csv');
-const wdCSV = path.join(repoPath, 'wd.csv');
+if (!database) {
+  console.error('No database ID provided as argument');
+  process.exit(1);
+}
+
+if (!targetDir) {
+  console.error('No target directory provided as argument');
+  process.exit(1);
+}
+
+await mkdir(targetDir, { recursive: true });
+
+const CSV = path.join(targetDir, 'curriculum.csv');
 const csvHeader = 'unit,chapter,name,repo_path';
 
 const notion = new Client({
-  auth: notionSecret,
+  auth: notionSecret
 });
 
 const n2m = new NotionToMarkdown({ notionClient: notion });
-n2m.setCustomTransformer('embed', async (block) => {
+n2m.setCustomTransformer('embed', async block => {
   const { embed } = block as any;
   if (!embed?.url) return '';
   return `<figure>
@@ -46,39 +47,44 @@ n2m.setCustomTransformer('embed', async (block) => {
 });
 
 async function writeMDFile(notionObj: any, index: number, total: number): Promise<void> {
-  const { icon, url, properties } = notionObj;
+  const { icon, properties } = notionObj;
 
-  const track = properties.Track.select.name;
-  const chapter = properties.Chapter?.select.name || 'No chapter';
-  const unit = properties.Unit?.select.name || 'No unit';
-  const name = properties.Name?.title[0]?.plain_text || 'No name';
+  const unit = properties.Unit?.select.name;
+  const chapter = properties.Chapter?.select.name;
+  const name = properties.Name?.title[0]?.plain_text;
+
+  if (!unit || !chapter || !name) {
+    console.error(`Missing required properties for page ID ${notionObj.id}. Skipping.`);
+    return;
+  }
 
   const instructorNotes =
     properties['Instructor notes']?.rich_text.length > 0
-      ? properties['Instructor notes']?.rich_text.map((t) => t.plain_text)
+      ? properties['Instructor notes']?.rich_text.map(t => t.plain_text)
       : null;
 
   const linksArr =
     properties['Instructor notes']?.rich_text.length > 0
-      ? properties['Instructor notes']?.rich_text.map((t) => t.href).filter(Boolean)
+      ? properties['Instructor notes']?.rich_text.map(t => t.href).filter(Boolean)
       : null;
   const instructorNotesLinks = linksArr?.length ? linksArr : null;
 
   const frontMatter = `---
-icon:
-  type: ${icon.type}
-  emoji: ${icon.emoji}
-url: ${url}
-properties:
-  name: ${name.replaceAll(':', '—')}
-  chapter: ${chapter.replaceAll(':', '—')}
-  chapterColor: ${properties.Chapter?.select.color || 'neutral'}
+  icon: ${icon.emoji}
+  title: ${name.replaceAll(':', '—')}
+  unit: 
+    name: ${unit.replaceAll(':', '—')}
+    color: ${properties.Unit?.select.color || 'neutral'}
+  chapter: 
+    name: ${chapter.replaceAll(':', '—')}
+    color: ${properties.Chapter?.select.color || 'neutral'}
+  type: 
+    name: ${properties['Content Type']?.select.name || 'No type'}
+    color: ${properties['Content Type']?.select.color || 'neutral'}
+  ft-id: ${properties['ID FT']?.formula?.string || 'N/A'}
+  pt-id: ${properties['ID PT']?.formula?.string || 'N/A'}
   objectives: ${properties.Objectives?.rich_text[0]?.plain_text || 'No objectives'}
-  type: ${properties['Content Type']?.select.name || 'No type'}
-  typeColor: ${properties['Content Type']?.select.color || 'neutral'}
   slides: ${properties.Slides?.rich_text[0]?.plain_text || null}
-  unit: ${unit.replaceAll(':', '—')}
-  unitColor: ${properties.Unit?.select.color || 'neutral'}
   instructorNotes:
     plainText: ${instructorNotes}
     links: ${instructorNotesLinks}
@@ -88,97 +94,79 @@ properties:
   const mdBlocks = await n2m.pageToMarkdown(notionObj.id);
   const { parent } = n2m.toMarkdownString(mdBlocks);
 
-  const dirpath = path.join(
-    repoPath,
-    // track.replaceAll('/', '-').replaceAll(':', ' —'),
-    // unit.replaceAll('/', '-').replaceAll(':', ' —'),
-    chapter.replaceAll('/', '-').replaceAll(':', ' —')
-  );
-  try {
-    await access(dirpath);
-  } catch {
-    await mkdir(dirpath, { recursive: true });
-  }
-  const filepath = path.join(dirpath, name.replaceAll('/', '-').replaceAll(':', ' —') + '.md');
+  const filepath = path.join(targetDir, slugify(unit), slugify(chapter), slugify(name) + '.md');
   const data = new Uint8Array(Buffer.from(frontMatter.concat(parent)));
+
+  // Ensure the directory for this file exists
+  const fileDir = path.dirname(filepath);
+  await mkdir(fileDir, { recursive: true });
+
   await writeFile(filepath, data);
   const pathInRepo = path.join(
     chapter.replaceAll('/', '-').replaceAll(':', ' —'),
     name.replaceAll('/', '-').replaceAll(':', ' —') + '.md'
   );
-  const csvPath = notionObj.parent.database_id === database_se ? seCSV : wdCSV;
-  await appendFile(csvPath, `\n"${unit}","${chapter}","${name}", "${pathInRepo}"`);
+  await appendFile(CSV, `\n"${unit}","${chapter}","${name}", "${pathInRepo}"`);
   console.log(`${index + 1}/${total}: ${name} ✓`);
 }
 
-async function processWithConcurrencyLimit(
+const processWithConcurrencyLimit = async (
   items: any[],
   cb: (item: any, index: number, total: number) => Promise<void>,
   maxConcurrent: number = 5
-): Promise<void> {
+): Promise<void> => {
   const total = items.length;
   const activePromises = new Set<Promise<void>>();
 
   for (let i = 0; i < items.length; i++) {
-    // Create the processing promise
-    const promise = cb(items[i], i, total).catch((error) => {
+    const promise = cb(items[i], i, total).catch(error => {
       console.error(
-        `Error processing item ${i + 1} - ${items[i].properties.Name?.title[0]?.plain_text || 'No name'}:`,
+        `Error processing item ${i + 1} - ${
+          items[i].properties.Name?.title[0]?.plain_text || 'No name'
+        }:`,
         error
       );
     });
 
-    // Add to active promises set
     activePromises.add(promise);
 
-    // Remove from set when done
     promise.finally(() => activePromises.delete(promise));
 
-    // If we've hit our concurrency limit, wait for at least one to complete
     if (activePromises.size >= maxConcurrent) {
       await Promise.race(activePromises);
     }
   }
 
-  // Wait for all remaining promises to complete
   await Promise.all(activePromises);
-}
+};
 
-async function egressNotion(databases: string[], maxConcurrent = 5) {
+const downloadCurriculum = async (database: string, maxConcurrent = 5) => {
   const startTime = Date.now();
   console.log(`Starting egress with max concurrent operations: ${maxConcurrent}`);
   let itemsToProcess: any[] = [];
 
-  for (const dbId of databases) {
-    let db: any;
-    try {
-      db = JSON.parse(await readFile(`${dbId}.json`, 'utf-8'));
-      console.log('Reading local file');
-    } catch {
-      console.log('Fetching from Notion...');
-      db = await getCurriculumContent(dbId);
-      const data = new Uint8Array(Buffer.from(JSON.stringify(db)));
-      await writeFile(dbId + '.json', data);
-    }
-    itemsToProcess = itemsToProcess.concat(db);
+  let db: any;
+  try {
+    db = JSON.parse(await readFile(`${database}.json`, 'utf-8'));
+    console.log('Reading local file');
+  } catch {
+    console.log('Fetching from Notion...');
+    db = await getCurriculumContent(database);
+    const data = new Uint8Array(Buffer.from(JSON.stringify(db)));
+    await writeFile(database + '.json', data);
   }
-  console.log(`Processing ${itemsToProcess.length} items...`);
-  await writeFile(seCSV, csvHeader);
-  await writeFile(wdCSV, csvHeader);
 
-  await processWithConcurrencyLimit(
-    itemsToProcess,
-    async (notionObj, index, total) => {
-      await writeMDFile(notionObj, index, itemsToProcess.length);
-    },
-    maxConcurrent
-  );
+  itemsToProcess = itemsToProcess.concat(db);
+
+  console.log(`Processing ${itemsToProcess.length} items...`);
+  await writeFile(CSV, csvHeader);
+
+  await processWithConcurrencyLimit(itemsToProcess.slice(0, 1), writeMDFile, maxConcurrent);
 
   const endTime = Date.now();
   const duration = (endTime - startTime) / 1000;
 
   console.log(`DONE! Processed ${itemsToProcess.length} items in ${duration.toFixed(2)} seconds`);
-}
+};
 
-egressNotion([database_wd, database_se]);
-// egressNotion([database_se]);
+downloadCurriculum(database);
