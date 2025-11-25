@@ -28,7 +28,7 @@ if (!targetDir) {
 await mkdir(targetDir, { recursive: true });
 
 const CSV = path.join(targetDir, 'curriculum.csv');
-const csvHeader = 'unit,chapter,name,repo_path';
+const csvHeader = 'unit,chapter,name,repo_path,ft_id,pt_id';
 
 const notion = new Client({
   auth: notionSecret
@@ -46,7 +46,7 @@ n2m.setCustomTransformer('embed', async block => {
 </figure>`;
 });
 
-async function writeMDFile(notionObj: any, index: number, total: number): Promise<void> {
+const writeMDFile = async (notionObj: any, index: number, total: number): Promise<void> => {
   const { icon, properties } = notionObj;
 
   const unit = properties.Unit?.select.name;
@@ -94,21 +94,23 @@ async function writeMDFile(notionObj: any, index: number, total: number): Promis
   const mdBlocks = await n2m.pageToMarkdown(notionObj.id);
   const { parent } = n2m.toMarkdownString(mdBlocks);
 
-  const filepath = path.join(targetDir, slugify(unit), slugify(chapter), slugify(name) + '.md');
+  const fileLocation = slugify(`${unit}/${chapter}/${name}.md`, { lower: true, remove: /[:?!]/g });
+
+  const filepath = path.join(targetDir, fileLocation);
   const data = new Uint8Array(Buffer.from(frontMatter.concat(parent)));
 
   // Ensure the directory for this file exists
   const fileDir = path.dirname(filepath);
   await mkdir(fileDir, { recursive: true });
-
   await writeFile(filepath, data);
-  const pathInRepo = path.join(
-    chapter.replaceAll('/', '-').replaceAll(':', ' —'),
-    name.replaceAll('/', '-').replaceAll(':', ' —') + '.md'
+  await appendFile(
+    CSV,
+    `\n"${unit}","${chapter}","${name}", "${fileLocation}", "${
+      properties['ID FT']?.formula?.string || 'N/A'
+    }", "${properties['ID PT']?.formula?.string || 'N/A'}"`
   );
-  await appendFile(CSV, `\n"${unit}","${chapter}","${name}", "${pathInRepo}"`);
   console.log(`${index + 1}/${total}: ${name} ✓`);
-}
+};
 
 const processWithConcurrencyLimit = async (
   items: any[],
