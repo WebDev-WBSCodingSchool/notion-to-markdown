@@ -27,8 +27,15 @@ if (!targetDir) {
 
 await mkdir(targetDir, { recursive: true });
 
-const CSV = path.join(targetDir, 'curriculum.csv');
-const csvHeader = 'unit,chapter,name,repo_path,ft_id,pt_id';
+const JSON_FILE = path.join(targetDir, 'curriculum.json');
+const curriculumData: any[] = [];
+
+// Helper function to normalize ft-id and pt-id
+// If the ID ends with a dot, return "NA", otherwise return the ID
+const normalizeId = (id: string | undefined): string => {
+  if (!id || id === 'N/A') return 'NA';
+  return id.trim().endsWith('.') ? 'NA' : id;
+};
 
 const notion = new Client({
   auth: notionSecret
@@ -51,7 +58,7 @@ const writeMDFile = async (notionObj: any, index: number, total: number): Promis
 
   const unit = properties.Unit?.select.name;
   const chapter = properties.Chapter?.select.name;
-  const name = properties.Name?.title[0]?.plain_text;
+  const name = properties.Name?.title.map((t: any) => t.plain_text).join('');
 
   if (!unit || !chapter || !name) {
     console.error(`Missing required properties for page ID ${notionObj.id}. Skipping.`);
@@ -69,6 +76,12 @@ const writeMDFile = async (notionObj: any, index: number, total: number): Promis
       : null;
   const instructorNotesLinks = linksArr?.length ? linksArr : null;
 
+  // Get IDs and normalize them
+  const rawFtId = properties['ID FT']?.formula?.string || 'N/A';
+  const rawPtId = properties['ID PT']?.formula?.string || 'N/A';
+  const ftId = normalizeId(rawFtId);
+  const ptId = normalizeId(rawPtId);
+
   const frontMatter = `---
   icon: ${icon.emoji}
   title: ${name.replaceAll(':', '—')}
@@ -81,8 +94,8 @@ const writeMDFile = async (notionObj: any, index: number, total: number): Promis
   type: 
     name: ${properties['Content Type']?.select.name || 'No type'}
     color: ${properties['Content Type']?.select.color || 'neutral'}
-  ft-id: ${properties['ID FT']?.formula?.string || 'N/A'}
-  pt-id: ${properties['ID PT']?.formula?.string || 'N/A'}
+  ft-id: ${ftId}
+  pt-id: ${ptId}
   objectives: ${properties.Objectives?.rich_text[0]?.plain_text || 'No objectives'}
   slides: ${properties.Slides?.rich_text[0]?.plain_text || null}
   instructorNotes:
@@ -94,7 +107,26 @@ const writeMDFile = async (notionObj: any, index: number, total: number): Promis
   const mdBlocks = await n2m.pageToMarkdown(notionObj.id);
   const { parent } = n2m.toMarkdownString(mdBlocks);
 
-  const fileLocation = slugify(`${unit}/${chapter}/${name}.md`, { lower: true, remove: /[:?!]/g });
+  // Helper to clean special characters before slugifying
+  const cleanForSlug = (text: string): string => {
+    return text
+      .replaceAll('/', '-')
+      .replaceAll('(', '')
+      .replaceAll(')', '')
+      .replaceAll(',', '')
+      .replaceAll(':', '-')
+      .replaceAll('+', '-')
+      .replaceAll('?', '')
+      .replaceAll('!', '')
+      .trim();
+  };
+
+  // Clean and slugify each part separately
+  const cleanUnit = slugify(cleanForSlug(unit), { lower: true });
+  const cleanChapter = slugify(cleanForSlug(chapter), { lower: true });
+  const cleanName = slugify(cleanForSlug(name), { lower: true });
+  
+  const fileLocation = `${cleanUnit}/${cleanChapter}/${cleanName}.md`;
 
   const filepath = path.join(targetDir, fileLocation);
   const data = new Uint8Array(Buffer.from(frontMatter.concat(parent)));
@@ -103,12 +135,28 @@ const writeMDFile = async (notionObj: any, index: number, total: number): Promis
   const fileDir = path.dirname(filepath);
   await mkdir(fileDir, { recursive: true });
   await writeFile(filepath, data);
-  await appendFile(
-    CSV,
-    `\n"${unit}","${chapter}","${name}", "${fileLocation}", "${
-      properties['ID FT']?.formula?.string || 'N/A'
-    }", "${properties['ID PT']?.formula?.string || 'N/A'}"`
-  );
+
+  // Create JSON item with all required metadata (excluding objectives, slides, instructorNotes)
+  curriculumData.push({
+    icon: icon.emoji,
+    title: name.replaceAll(':', '—'),
+    unit: {
+      name: unit.replaceAll(':', '—'),
+      color: properties.Unit?.select.color || 'neutral'
+    },
+    chapter: {
+      name: chapter.replaceAll(':', '—'),
+      color: properties.Chapter?.select.color || 'neutral'
+    },
+    type: {
+      name: properties['Content Type']?.select.name || 'No type',
+      color: properties['Content Type']?.select.color || 'neutral'
+    },
+    'ft-id': ftId,
+    'pt-id': ptId,
+    repo_path: fileLocation
+  });
+
   console.log(`${index + 1}/${total}: ${name} ✓`);
 };
 
@@ -161,9 +209,12 @@ const downloadCurriculum = async (database: string, maxConcurrent = 5) => {
   itemsToProcess = itemsToProcess.concat(db);
 
   console.log(`Processing ${itemsToProcess.length} items...`);
-  await writeFile(CSV, csvHeader);
 
   await processWithConcurrencyLimit(itemsToProcess, writeMDFile, maxConcurrent);
+
+  curriculumData.sort((a, b) => a['ft-id'].localeCompare(b['ft-id']));
+  await writeFile(JSON_FILE, JSON.stringify(curriculumData, null, 2));
+  console.log(`\nJSON file written to: ${JSON_FILE}`);
 
   const endTime = Date.now();
   const duration = (endTime - startTime) / 1000;
