@@ -53,9 +53,8 @@ n2m.setCustomTransformer('embed', async block => {
 </figure>`;
 });
 
-// Filter out child_page blocks from parent page content (they're saved separately as solutions)
 n2m.setCustomTransformer('child_page', async () => {
-  return ''; // Return empty string to exclude child pages from parent content
+  return '';
 });
 
 const writeMDFile = async (notionObj: any, index: number, total: number): Promise<void> => {
