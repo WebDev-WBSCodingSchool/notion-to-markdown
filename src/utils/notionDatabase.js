@@ -78,3 +78,74 @@ export const getCurriculumContent = async database_id => {
   }
   return curriculumDatabase;
 };
+
+// Recursively get all blocks from a page/block, including nested blocks
+const getAllBlocks = async (blockId, notion) => {
+  let next_cursor = null;
+  const allBlocks = [];
+  
+  const blocks = await notion.blocks.children.list({ block_id: blockId });
+  allBlocks.push(...blocks.results);
+  
+  if (blocks.has_more) {
+    next_cursor = blocks.next_cursor;
+  }
+  
+  while (next_cursor) {
+    const moreBlocks = await notion.blocks.children.list({
+      block_id: blockId,
+      page_size: 100,
+      start_cursor: next_cursor
+    });
+    allBlocks.push(...moreBlocks.results);
+    
+    if (moreBlocks.has_more) {
+      next_cursor = moreBlocks.next_cursor;
+    } else {
+      next_cursor = null;
+    }
+  }
+  
+  // Recursively check blocks that have children
+  for (const block of allBlocks) {
+    if (block.has_children) {
+      const nestedBlocks = await getAllBlocks(block.id, notion);
+      allBlocks.push(...nestedBlocks);
+    }
+    
+    // Check synced blocks - get content from the original synced block
+    if ('type' in block && block.type === 'synced_block' && block.synced_block?.synced_from?.block_id) {
+      const syncedBlocks = await getAllBlocks(block.synced_block.synced_from.block_id, notion);
+      allBlocks.push(...syncedBlocks);
+    }
+  }
+  
+  return allBlocks;
+};
+
+// Get child pages (solutions) from a parent page
+export const getChildPages = async pageId => {
+  const notion = new Client({
+    auth: process.env.NOTION_SECRET
+  });
+  try {
+    const childPages = [];
+    
+    // Get all blocks recursively, including nested and synced blocks
+    const allBlocks = await getAllBlocks(pageId, notion);
+    
+    // Filter for child_page blocks
+    for (const block of allBlocks) {
+      if ('type' in block && block.type === 'child_page') {
+        // Retrieve the full page data
+        const childPage = await notion.pages.retrieve({ page_id: block.id });
+        childPages.push(childPage);
+      }
+    }
+    
+    return childPages;
+  } catch (error) {
+    console.error(`Error fetching child pages for ${pageId}:`, error);
+    return [];
+  }
+};

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { Client } from '@notionhq/client';
 import { NotionToMarkdown } from 'notion-to-md';
 import slugify from 'slugify';
-import { getCurriculumContent } from './utils/notionDatabase.js';
+import { getCurriculumContent, getChildPages } from './utils/notionDatabase.js';
 
 const notionSecret = process.env.NOTION_SECRET;
 const database = process.argv[2];
@@ -51,6 +51,11 @@ n2m.setCustomTransformer('embed', async block => {
   }"></iframe>
   <figcaption>${await n2m.blockToMarkdown(embed?.caption)}</figcaption>
 </figure>`;
+});
+
+// Filter out child_page blocks from parent page content (they're saved separately as solutions)
+n2m.setCustomTransformer('child_page', async () => {
+  return ''; // Return empty string to exclude child pages from parent content
 });
 
 const writeMDFile = async (notionObj: any, index: number, total: number): Promise<void> => {
@@ -135,6 +140,29 @@ const writeMDFile = async (notionObj: any, index: number, total: number): Promis
   const fileDir = path.dirname(filepath);
   await mkdir(fileDir, { recursive: true });
   await writeFile(filepath, data);
+
+  // Check for child pages (solutions) and save them
+  const childPages = await getChildPages(notionObj.id);
+  if (childPages.length > 0) {
+    // Get the content of the first child page (solution)
+    const solutionPage = childPages[0];
+    const solutionMdBlocks = await n2m.pageToMarkdown(solutionPage.id);
+    const { parent: solutionContent } = n2m.toMarkdownString(solutionMdBlocks);
+    
+    // Create solutions directory path: solutions/{unit}/{chapter}/{parent-name}.md
+    const solutionFileLocation = `solutions/${cleanUnit}/${cleanChapter}/${cleanName}.md`;
+    const solutionFilepath = path.join(targetDir, solutionFileLocation);
+    
+    // Use the same frontmatter as the parent page
+    const solutionData = new Uint8Array(Buffer.from(frontMatter.concat(solutionContent)));
+    
+    // Ensure the solutions directory exists
+    const solutionFileDir = path.dirname(solutionFilepath);
+    await mkdir(solutionFileDir, { recursive: true });
+    await writeFile(solutionFilepath, solutionData);
+    
+    console.log(`  └─ Solution saved: ${solutionFileLocation}`);
+  }
 
   // Create JSON item with all required metadata (excluding objectives, slides, instructorNotes)
   curriculumData.push({
