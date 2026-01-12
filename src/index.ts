@@ -30,8 +30,6 @@ await mkdir(targetDir, { recursive: true });
 const JSON_FILE = path.join(targetDir, 'curriculum.json');
 const curriculumData: any[] = [];
 
-// Helper function to normalize ft-id and pt-id
-// If the ID ends with a dot, return "NA", otherwise return the ID
 const normalizeId = (id: string | undefined): string => {
   if (!id || id === 'N/A') return 'NA';
   return id.trim().endsWith('.') ? 'NA' : id;
