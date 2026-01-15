@@ -57,6 +57,7 @@ export const extractPageMetadata = (notionObj) => {
   const ptId = normalizeId(rawPtId);
 
   return {
+    notionId: notionObj.id,
     icon: icon.emoji,
     title: name.replaceAll(':', '—'),
     unit: {

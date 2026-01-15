@@ -3,6 +3,7 @@ import { createWriteStream } from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import slugify from 'slugify';
 
 export const downloadImage = async (url, filepath, authToken) => {
@@ -47,6 +48,10 @@ export const processImagesInMarkdown = async (
   repoUrl,
   authToken
 ) => {
+  if (!content || typeof content !== 'string') {
+    return content || '';
+  }
+  
   const imagesDir = path.join(fileDir, 'images');
   await mkdir(imagesDir, { recursive: true });
   
@@ -66,7 +71,8 @@ export const processImagesInMarkdown = async (
       const fileExtension = path.extname(filename) || '.png';
       const baseName = path.basename(filename, fileExtension);
       const sanitizedBaseName = slugify(baseName, { lower: true, strict: true });
-      const sanitizedFilename = `${sanitizedBaseName}${fileExtension}`;
+      const uuid = randomUUID().split('-')[0];
+      const sanitizedFilename = `${sanitizedBaseName}-${uuid}${fileExtension}`;
       
       const imagePath = path.join(imagesDir, sanitizedFilename);
       const imagePathRelativeToRepo = path.relative(repoRoot, imagePath);
@@ -74,7 +80,9 @@ export const processImagesInMarkdown = async (
       
       await downloadImage(imageUrl, imagePath, authToken);
       
-      const fullImageUrl = `${repoUrl}/${imagePathForMarkdown}`;
+      const fullImageUrl = repoUrl 
+        ? `${repoUrl}/blob/main/${imagePathForMarkdown}`
+        : imagePathForMarkdown;
       
       processedContent = processedContent.replace(
         fullMatch,
